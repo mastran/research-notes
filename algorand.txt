@@ -1,0 +1,182 @@
+Algorand
+========
+
+What are advantages/disadvantages of using credit cards over the Internet?
+  + Works much of the time
+  + Good buyer protection
+  - Bad seller protection (buyer can contest charges and usually win)
+  - Card numbers easy to steal (requires complex fraud detection)
+  - High transaction charges
+  - International payments are hard (many don't go through)
+  - Requires trusted third party
+  - Controlled by bank (e.g., can't buy spam pharmaceuticals... maybe good?)
+  - No privacy
+
+How do in-person cash transactions compare?
+  - Doesn't work over Internet
+  - Transactions are final, so no post-transaction buyer protection
+    though particularly for small transactions, this may be fine
+  + Seller is protected (assuming no counterfeiting)
+  + Payment always goes through
+  + No trusted third party involved in transaction
+  + Private (anonymous)
+
+Suppose we replaced credit card numbers with public/private key pairs?
+  Bank gives you hypothetical card-sized secure computer with input, display
+  Sign each transaction with amount, recipient, comment
+  What would this fix?
+    Credit card numbers would be harder to steal
+    Lower fraud could lead to lower (but still non-zero) transaction fees
+    Could also lower fraud-detection false positives
+    Could give merchants protection (eliminate "card not present" transactions)
+  Remaining problems?
+    Privacy, third party trust, bank control, transaction charges
+
+What challenges arise if we try to get rid of the bank?
+  1. How does payee turn a digital signature into, say, USD?
+  2. How does payee even know payer has enough money to cover transaction?
+
+What is Bitcoin, and how does it address these problems?
+  BTC is a new currency, with cryptographically limited supply
+  Coins are associated with public signature keys
+  Coins transferred by signing new public key with old private key
+  #1 isn't addressed directly, that is topic of Wednesday's lecture
+    Instead, bitcoins themselves have value
+    Limited supply and social convention create value in bitcoins
+    Bitcoin exchanges will wire you USD for BTC and vice versa
+    Value fluctuates wildly (has gone from from $1,000 to $11,000 this year)
+  #2 solved by "distributed timestamp server"
+
+Before getting into how BTC implements it, why does a timestamp server help?
+  Gives consensus on immutable record of all past transactions and their order
+  Example:  Preventing the double-spending problem
+    Public key A is worth 1 BTC
+    A pays 1 BTC to B, walks away with some goods
+    A tries to pay 1 BTC to C, walk away with more goods
+    With timestamp server, everyone agrees A->C message later than A->B
+    Hence A->C is not valid, because A is already spent
+
+How does bitcoin's distributed timestamp server work?  Proof-of-work Mining
+  Flood new transactions
+  History progresses in blocks of new transactions:
+    block = { H(previous-block), nonce, H*(new-transactions) }
+    Note inclusion of previous block makes this a *block chain*
+  By convention, only accept block if H(block) < target-value
+    Currently H(block) must start with >72 0 bits.
+    So must try an expected five hextillion (5*10^21) nonces to find good one
+  Finding these nonces, known as "mining", is computationally very hard
+  So incentivize finding the next block with bitcoins!
+    First transaction in block is special "coinbase" transaction
+    Creates 12.5 new BTC paid to block miner
+        https://bitcoin.org/en/developer-reference#serialized-blocks
+  Note: adjust target-value as more miners come on-line
+    In practice, new blocks mined every 7-10 minutes or so
+  Given two incompatible block chains, always take longest one
+How does this solve the double-spending problem?
+  Well-behaved nodes ordinarily shouldn't fork block chain
+  Assume ill-behaved nodes have less aggregate compute than well-behaved ones
+    (Though 49% limit is inadequate http://arxiv.org/abs/1311.0243)
+  If bad buys don't immediately fork chain and double spend, can't catch up
+    After receiving payment, before handing over goods,
+    wait for several new blocks (e.g., ~1hr) to cement payment in history
+  And note mining payouts incentivize honest behavior even by greedy miners
+
+Still a bunch of problems with bitcoin
+  1. Most people care about existing fiat currencies (USD, EUR), not BTC
+     Don't want to assume any exchange risk on fluctuating value of BTC
+  2. Don't want to download entire history to verify transactions
+  3. Trust people for reasons other how much CPU power they waste
+  4. Make transactions clear quickly (seconds, not 10 min - 1 hr like BTC)
+  5. Huge amount of energy wasted on mining!
+
+Let's solve #4-5 with Byzantine agreement
+  Can we run PBFT?
+    Problem: who are the 3f+1 nodes and how do we know 2f+1 are honest?
+    Can't just enumerate the Bitcoin users
+  Idea: have the coin owners be nodes in PBFT
+    Instead trusting hashing power owners to mine coins, trust coin owners
+      If you have a lot of coins, probably don't want to mess up blockchain
+      This is known as "proof of stake" instead of proof of work
+  But will PBFT scale to 10,000+ nodes?  With difficulty
+
+Straw man: coin owners elect council to run PBFT (basically peercoin [32])
+  How do you know whom to vote for?  Council could have bad actors
+  What do you do after a fork?
+  Even without fork, council picks block, could censor certain transactions
+
+Straw man 2: select council by lowest Hash(prev-block, node-pubkey) (homework)
+  Key problem: attacker can predict how block affects council membership
+  If attacker ever controls council, can manipulate next block to keep power
+    Censor transactions, sign forks, etc.
+
+How does Algorand address these issues?  Sortition
+  Requires a VRF--what's this?
+    Generate() -> (pk, sk)
+    VRF(sk, x) -> (pi, r) where w/o pi or sk, r looks like random function of x
+    Verify(pk, r, pi, x) -> Bool (true if r was valid)
+    Key property: pk holder can't predict, sk holder can't manipulate
+  What is sortition?
+    Users commit to pk before knowing x
+      E.g., x = seed||round||previous-block||role
+    Choose the "best" tau values of r for different nodes' VRF output
+    Note best could just be lowest value of x
+      Slight optimization--get j shots at being best if you have j coins
+      Saves you from having j different public keys
+  Important sortition parameters
+    tau = target expected number of committee members
+    T = fraction of expected committee size required for quorum
+
+What are the different ways in which Algorand uses sortition?
+  Choosing a candidate block
+  Choosing a a smaller "committee" whose votes count in BA*
+  Choosing a new seed periodically
+  Example: each node broadcasts block proposal only if good sortition hash
+    E.g., set so expected number of values is tau_{process}
+    Sortition hash also works as block *priority*
+      actually hash of (r||j) for best j, to weight by number of coins owned
+    What if zero block proposals?  Can always go with empty block
+    What if malicious highest-priority proposer?
+      Can propose two conflicting blocks
+      Okay if this becomes a throwaway round (agree on empty block)
+        Sortition will pick a different highest priority proposer next round
+      But must maintain safety!
+
+How does BA* ensure safety?
+* First, reduce the question to a binary decision problem
+  - Everybody in the committee votes for highest priority block in REDUCTION1
+    Does some block get t_step fraction of council?
+      Then vote for it in REDUCTION2
+    Otherwise, if timeout w/o quorum at either step, return empty_block
+    Result: network synchronous + honest proposer => choose block value
+            otherwise => choose empty_block
+    Guarantee: won't see multiple non-empty blocks
+    Caveat: Some good nodes could see block while others see empty_block
+* Next, binary agreement on result of previous step or empty_block
+  Algorithm 8 looks a bit like Mostefaoui (from Honey Badger)
+      Try block_hash/empty_hash/one of two selected by common coin
+    Except common coin exploits VRF, doesn't need real common coin alg.
+    If common coin fails, just affects liveness
+  But note Algorithm 8 not safe on its own
+    Maybe one node sees block_hash, remaining time out and choose empty_hash
+  To fix: differentiate case when you voted same in all rounds (cool technique)
+    Alg. 8 returns a "FINAL" value if never voted for any other value
+  Alg. 3 then holds *second* vote on whether quorum saw final vote
+    If second vote succeeds, means quorum voted for r AND nothing else
+    Use bigger tau for FINAL vote, so even harder for committee to be bad
+    If second vote fails, return only *tentative* consensus
+    Can't act on tentative consensus, since can fork--what to do?
+    May get stuck (since nodes will reject blocks with wrong parent)
+* Section 8.2: run a meta-level BA* to select among forks
+    Kick of meta-BA* much less frequently, with more secure seeds, etc.
+    Allows nodes to pick a chain (reset some tentative suffix of history)
+      Resets some suffix of tentative main BA*
+    Note 8.2 only needs tentative consensus
+      Bad consensus => main BA* won't make progress
+        Because nodes reject blocks that have the wrong parent pointer
+      Okay because next meta-BA* can fix the problem
+
+Why is BA* not safe in a completely asynchronous model?
+  Attacker can make rounds fail large number of times until bad committee
+Why doesn't BA* face the problem under it's limited synchrony assumption?
+  Because each seed is used only a finite number of times
+  E.g., algorithm 8 even hangs after too many rounds
